@@ -1,0 +1,17 @@
+{
+    "name": "꼬맨틀 오프라인",
+    "short_name": "꼬맨틀",
+    "description": "인터넷 없이도 즐기는 단어 유사도 추측 게임",
+    "lang": "ko",
+    "start_url": "./",
+    "scope": "./",
+    "display": "standalone",
+    "orientation": "portrait",
+    "background_color": "#f6f6f8",
+    "theme_color": "#f7617a",
+    "icons": [
+        {"src": "icons/icon-192.png", "type": "image/png", "sizes": "192x192"},
+        {"src": "icons/icon-512.png", "type": "image/png", "sizes": "512x512"},
+        {"src": "icons/icon.svg", "type": "image/svg+xml", "sizes": "any"}
+    ]
+}

@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>꼬맨틀 오프라인</title>
+    <meta name="description" content="인터넷 없이도 즐기는 단어 유사도 추측 게임, 꼬맨틀 오프라인 버전">
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#16171c" media="(prefers-color-scheme: dark)">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="꼬맨틀">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="icon" href="icons/favicon.ico" sizes="32x32">
+    <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+    <link rel="stylesheet" href="style.css">
+    <script>
+        // 깜빡임 없이 테마를 먼저 적용
+        try {
+            const t = localStorage.getItem('ggo:theme');
+            if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+        } catch (e) {}
+    </script>
+</head>
+<body>
+<header class="topbar">
+    <button class="icon-btn" id="help-btn" aria-label="도움말">?</button>
+    <div class="title">
+        <h1>꼬맨틀</h1>
+        <button class="puzzle-chip" id="puzzle-chip" aria-label="문제 번호 바꾸기">-</button>
+    </div>
+    <button class="icon-btn" id="menu-btn" aria-label="기록과 설정">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M4 6h16v2H4zm0 5h16v2H4zm0 5h16v2H4z"/></svg>
+    </button>
+</header>
+
+<main>
+    <section id="loading" class="card loading">
+        <p id="loading-text">단어 데이터를 불러오는 중…</p>
+        <div class="bar"><div class="bar-fill" id="loading-bar"></div></div>
+        <p class="muted small" id="loading-sub">처음 한 번만 내려받고, 그 다음부터는 인터넷 없이 플레이할 수 있어요.</p>
+        <button class="btn" id="retry-btn" hidden>다시 시도</button>
+    </section>
+
+    <section id="game" hidden>
+        <p class="story" id="story"></p>
+
+        <form id="form" class="guess-form" autocomplete="off">
+            <input id="guess" type="text" lang="ko" placeholder="단어를 입력하세요" enterkeyhint="send"
+                   autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" aria-label="추측할 단어">
+            <button class="btn primary" type="submit">추측</button>
+        </form>
+        <input id="dummy" class="dummy" tabindex="-1" aria-hidden="true">
+        <p class="error" id="error" role="status"></p>
+
+        <div id="result" class="card result" hidden></div>
+
+        <div id="latest" class="guess-list latest"></div>
+
+        <div class="list-head" id="list-head" hidden>
+            <span><span id="guess-count">0</span>개 추측</span>
+            <div class="sort" role="group" aria-label="정렬">
+                <button data-sort="sim" class="on">유사도순</button>
+                <button data-sort="time">추측순</button>
+                <button data-sort="abc">가나다순</button>
+            </div>
+        </div>
+        <div id="guesses" class="guess-list"></div>
+
+        <div class="footer-actions">
+            <button class="btn ghost" id="giveup-btn">포기하기</button>
+        </div>
+        <p class="muted small center" id="yesterday"></p>
+    </section>
+</main>
+
+<dialog id="help-dialog" class="sheet">
+    <h2>꼬맨틀 하는 법</h2>
+    <p>정답 단어를 맞혀 보세요. 단어를 입력하면 정답과 얼마나 <b>의미가 비슷한지</b> 유사도로 알려 줍니다.
+        철자가 아니라 의미가 기준이에요.</p>
+    <p>유사도는 -100에서 100 사이 값이고, 높을수록 정답과 가깝습니다.
+        정답과 가장 비슷한 1,000개 단어 안에 들면 <b>순위</b>가 표시됩니다 (1위가 가장 가까움).</p>
+    <p>매일 자정(한국 시간)에 새 문제가 열립니다. 원본 꼬맨틀과 같은 날 같은 문제가 나와요.
+        한 번 데이터를 받은 뒤에는 비행기 모드에서도 할 수 있습니다.</p>
+    <p class="muted small">원본: <a href="https://github.com/NewsJelly/semantle-ko" target="_blank" rel="noopener">꼬맨틀 (NewsJelly)</a>,
+        단어 벡터: fastText cc.ko.300 (CC BY-SA 3.0). GPL-3.0으로 배포됩니다.</p>
+    <form method="dialog"><button class="btn primary wide">시작하기</button></form>
+</dialog>
+
+<dialog id="menu-dialog" class="sheet">
+    <h2>나의 기록</h2>
+    <div id="stats" class="stats"></div>
+    <h2>설정</h2>
+    <label class="row">화면 테마
+        <select id="theme">
+            <option value="auto">기기 설정</option>
+            <option value="light">밝게</option>
+            <option value="dark">어둡게</option>
+        </select>
+    </label>
+    <label class="row">공유할 때 추측 횟수 포함 <input type="checkbox" id="share-guesses"></label>
+    <label class="row">공유할 때 소요 시간 포함 <input type="checkbox" id="share-time"></label>
+    <label class="row">공유할 때 최대 유사도 포함 <input type="checkbox" id="share-top"></label>
+    <p class="muted small" id="storage-info"></p>
+    <form method="dialog"><button class="btn wide">닫기</button></form>
+</dialog>
+
+<dialog id="puzzle-dialog" class="sheet">
+    <h2>다른 문제 풀기</h2>
+    <p class="muted small">지난 문제도 오프라인으로 풀 수 있어요. 지난 문제 기록은 통계에 들어가지 않습니다.</p>
+    <form id="puzzle-form" class="guess-form">
+        <input id="puzzle-input" type="number" inputmode="numeric" min="0" aria-label="문제 번호">
+        <button class="btn primary" type="submit">풀기</button>
+    </form>
+    <div class="quick">
+        <button class="btn" id="today-btn">오늘 문제</button>
+        <button class="btn" id="random-btn">아무 지난 문제</button>
+    </div>
+    <form method="dialog"><button class="btn wide">닫기</button></form>
+</dialog>
+
+<dialog id="nearest-dialog" class="sheet tall">
+    <h2 id="nearest-title">상위 1,000개 단어</h2>
+    <div id="nearest-list" class="nearest-list"></div>
+    <form method="dialog"><button class="btn wide">닫기</button></form>
+</dialog>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
