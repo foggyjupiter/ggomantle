@@ -11,8 +11,8 @@ android {
         minSdk 24
         // 35부터는 화면이 상태 표시줄 아래까지 강제로 늘어나서 34로 둔다
         targetSdk 34
-        versionCode 1
-        versionName '1.0'
+        versionCode 2
+        versionName '1.1'
     }
 
     sourceSets {
