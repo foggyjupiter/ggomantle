@@ -1,12 +1,14 @@
 /*
     꼬맨틀 오프라인 — 안드로이드 앱.
-    web/ 폴더를 앱 안에 넣고 WebView로 띄운다. 인터넷 없이 동작한다.
+    web/ 폴더의 화면을 WebView로 띄우고, 유사도 계산은 Engine(전체 단어 데이터)이 한다.
+    인터넷 없이 동작한다.
     Licensed under the GNU GPL v3.
 */
 package io.github.foggyjupiter.ggomantle;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.content.res.AssetFileDescriptor;
 import android.net.Uri;
 import android.os.Bundle;
 import android.webkit.JavascriptInterface;
@@ -18,6 +20,13 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
 import androidx.webkit.WebViewAssetLoader;
+
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
+import java.util.Properties;
 
 public class MainActivity extends Activity {
     // 이 주소는 실제 인터넷이 아니라 WebViewAssetLoader가 APK 안의 파일로 응답한다
@@ -87,7 +96,55 @@ public class MainActivity extends Activity {
                 });
     }
 
+    // APK 안의 파일을 압축 없이 넣어 두고(noCompress) 그대로 매핑한다 → 메모리에 올리지 않음
+    private ByteBuffer map(String name) throws IOException {
+        AssetFileDescriptor fd = getAssets().openFd("words/" + name);
+        try (FileInputStream in = fd.createInputStream()) {
+            return in.getChannel().map(FileChannel.MapMode.READ_ONLY, fd.getStartOffset(), fd.getLength());
+        }
+    }
+
+    private Engine engine;
+
     private class Bridge {
+        // app.js가 부르는 계산 함수들 (web/engine.js와 같은 결과를 JSON 문자열로)
+        @JavascriptInterface
+        public String engineInit() {
+            try {
+                if (engine == null) {
+                    Properties meta = new Properties();
+                    try (InputStream in = getAssets().open("words/meta.txt")) {
+                        meta.load(in);
+                    }
+                    engine = new Engine(meta, map("words.bin"), map("vectors.bin"), map("norms.bin"),
+                            map("rankable.bin"), map("secrets.bin"));
+                }
+                return engine.init();
+            } catch (Exception e) {
+                return "{\"error\":\"" + e.getClass().getSimpleName() + "\"}";
+            }
+        }
+
+        @JavascriptInterface
+        public String engineStory(int puzzle) {
+            return engine.story(puzzle);
+        }
+
+        @JavascriptInterface
+        public String engineGuess(int puzzle, String word) {
+            return engine.guess(puzzle, word);
+        }
+
+        @JavascriptInterface
+        public String engineNearest(int puzzle) {
+            return engine.nearestJson(puzzle);
+        }
+
+        @JavascriptInterface
+        public String engineSecret(int puzzle) {
+            return engine.secret(puzzle);
+        }
+
         @JavascriptInterface
         public void share(String text) {
             Intent send = new Intent(Intent.ACTION_SEND);

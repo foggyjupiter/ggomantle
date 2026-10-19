@@ -16,8 +16,9 @@ android {
     }
 
     sourceSets {
-        // 웹 버전(web/)을 그대로 앱 안에 넣는다
-        main.assets.srcDirs = ['../../web']
+        // 화면은 web/에서 가져오고(웹용 30MB 데이터 제외), 단어 데이터는 bigdata/words/
+        // (tools/build_app_data.py로 생성, 용량이 커서 저장소에는 없음)
+        main.assets.srcDirs = [layout.buildDirectory.dir('webassets'), 'bigdata']
     }
 
     androidResources {
@@ -52,4 +53,23 @@ android {
 
 dependencies {
     implementation 'androidx.webkit:webkit:1.12.1'
+}
+
+def syncWeb = tasks.register('syncWeb', Sync) {
+    from('../../web') {
+        exclude 'data/**', 'sw.js'
+    }
+    into layout.buildDirectory.dir('webassets')
+}
+
+def checkBigData = tasks.register('checkBigData') {
+    doLast {
+        if (!file('bigdata/words/vectors.bin').exists()) {
+            throw new GradleException('android/app/bigdata/words/ 가 없습니다. tools/build_app_data.py를 먼저 실행하세요.')
+        }
+    }
+}
+
+tasks.named('preBuild') {
+    dependsOn syncWeb, checkBigData
 }

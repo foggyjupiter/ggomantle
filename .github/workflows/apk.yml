@@ -3,7 +3,7 @@ name: Build APK
 on:
   push:
     branches: [main]
-    paths: ['web/**', 'android/**', '.github/workflows/apk.yml']
+    paths: ['web/**', 'android/**', 'tools/**', '.github/workflows/apk.yml']
   workflow_dispatch:
 
 jobs:
@@ -15,10 +15,20 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
-      - name: Build
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build word data (about 1.5M words)
+        run: |
+          pip install numpy tqdm
+          curl -sSL -o cc.ko.300.vec.gz https://dl.fbaipublicfiles.com/fasttext/vectors-crawl/cc.ko.300.vec.gz
+          python tools/build_app_data.py --vec cc.ko.300.vec.gz --filtered tools/ko_filtered.txt
+          rm cc.ko.300.vec.gz
+      - name: Build APK
         working-directory: android
         run: ./gradlew assembleRelease --no-daemon
       - uses: actions/upload-artifact@v4
         with:
           name: ggomantle-apk
           path: android/app/build/outputs/apk/release/app-release.apk
+          compression-level: 0

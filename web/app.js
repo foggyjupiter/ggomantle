@@ -30,28 +30,30 @@ let callId = 0;
 const pending = new Map();
 let onProgress = () => {};
 
-// 안드로이드 앱(WebView)에서는 워커가 APK 안의 파일을 직접 못 읽는 기기가 있어서
-// 화면 쪽에서 파일을 읽어 넘긴다.
-async function startWorker() {
-    if (!IS_APP) {
-        worker = new Worker('engine.js');
-        worker.onmessage = onWorkerMessage;
-        return {cache: true};
-    }
-    const get = async (url) => {
-        const res = await fetch(url);
-        if (!res.ok) throw new Error(`${url}: ${res.status}`);
-        return res;
-    };
-    const src = await (await get('engine.js')).text();
-    worker = new Worker(URL.createObjectURL(new Blob([src], {type: 'text/javascript'})));
+// 안드로이드 앱에서는 계산을 앱(Java, 전체 단어 데이터)이 하고, 웹에서는 워커(engine.js)가 한다.
+function nativeEngine() {
+    return window.GgoApp && window.GgoApp.engineInit ? window.GgoApp : null;
+}
+
+function startWorker() {
+    if (nativeEngine()) return {};
+    worker = new Worker('engine.js');
     worker.onmessage = onWorkerMessage;
-    const [meta, words, vectors] = await Promise.all([
-        get('data/meta.json').then(r => r.json()),
-        get('data/words.txt').then(r => r.arrayBuffer()),
-        get('data/vectors.bin').then(r => r.arrayBuffer()),
-    ]);
-    return {files: {meta, words, vectors}};
+    return {cache: true};
+}
+
+async function callNative(type, args) {
+    const g = nativeEngine();
+    const run = {
+        init: () => g.engineInit(),
+        story: () => g.engineStory(args.puzzle),
+        guess: () => g.engineGuess(args.puzzle, args.word),
+        nearest: () => g.engineNearest(args.puzzle),
+        secret: () => g.engineSecret(args.puzzle),
+    }[type];
+    const result = JSON.parse(await run());
+    if (type === 'init' && result.error) throw new Error(result.error);
+    return result;
 }
 
 function onWorkerMessage(event) {
@@ -62,7 +64,9 @@ function onWorkerMessage(event) {
     pending.delete(id);
     error ? p.reject(new Error(error)) : p.resolve(result);
 }
+
 function call(type, args) {
+    if (nativeEngine()) return callNative(type, args || {});
     return new Promise((resolve, reject) => {
         const id = ++callId;
         pending.set(id, {resolve, reject});
@@ -520,7 +524,7 @@ async function start() {
 
     let info;
     try {
-        info = await call('init', await startWorker());
+        info = await call('init', startWorker());
     } catch (e) {
         $('loading-text').textContent = e.message === 'offline-first-run'
             ? '처음 한 번은 인터넷 연결이 필요해요. 연결한 뒤 다시 시도해 주세요.'
