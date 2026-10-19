@@ -29,7 +29,7 @@
     <button class="icon-btn" id="help-btn" aria-label="도움말">?</button>
     <div class="title">
         <h1>꼬맨틀</h1>
-        <button class="puzzle-chip" id="puzzle-chip" aria-label="문제 번호 바꾸기">-</button>
+        <button class="puzzle-chip" id="puzzle-chip" aria-label="새 게임 또는 코드 입력">-</button>
     </div>
     <button class="icon-btn" id="menu-btn" aria-label="기록과 설정">
         <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M4 6h16v2H4zm0 5h16v2H4zm0 5h16v2H4z"/></svg>
@@ -82,8 +82,10 @@
         철자가 아니라 의미가 기준이에요.</p>
     <p>유사도는 -100에서 100 사이 값이고, 높을수록 정답과 가깝습니다.
         정답과 가장 비슷한 1,000개 단어 안에 들면 <b>순위</b>가 표시됩니다 (1위가 가장 가까움).</p>
-    <p>매일 자정(한국 시간)에 새 문제가 열립니다. 원본 꼬맨틀과 같은 날 같은 문제가 나와요.
-        한 번 데이터를 받은 뒤에는 비행기 모드에서도 할 수 있습니다.</p>
+    <p>게임마다 정답이 랜덤으로 정해지고 <b>코드</b>가 붙어요. 친구에게 코드를 알려 주면 같은 문제를 풀 수 있습니다.
+        위쪽 코드 버튼을 누르면 새 게임을 시작하거나 코드를 입력할 수 있어요.
+        원본 꼬맨틀과 같은 ‘오늘의 꼬맨틀’도 있습니다.</p>
+    <p>인터넷 없이 비행기 모드에서도 할 수 있습니다.</p>
     <p class="muted small">원본: <a href="https://github.com/NewsJelly/semantle-ko" target="_blank" rel="noopener">꼬맨틀 (NewsJelly)</a>,
         단어 벡터: fastText cc.ko.300 (CC BY-SA 3.0). GPL-3.0으로 배포됩니다.</p>
     <form method="dialog"><button class="btn primary wide">시작하기</button></form>
@@ -108,17 +110,17 @@
 </dialog>
 
 <dialog id="puzzle-dialog" class="sheet">
-    <h2>다른 문제 풀기</h2>
-    <p class="muted small">지난 문제도 오프라인으로 풀 수 있어요. 지난 문제 기록은 통계에 들어가지 않습니다.</p>
+    <h2>새 게임</h2>
+    <button class="btn primary wide" id="random-btn">새 랜덤 게임</button>
+    <h2 class="gap">친구와 같은 문제 풀기</h2>
+    <p class="muted small">친구에게 받은 코드를 입력하면 같은 정답 단어가 나와요. 아무 글자나 정해서 써도 됩니다.</p>
     <form id="puzzle-form" class="guess-form">
-        <input id="puzzle-input" type="number" inputmode="numeric" min="0" aria-label="문제 번호">
-        <button class="btn primary" type="submit">풀기</button>
+        <input id="puzzle-input" type="text" placeholder="예: K7QXM" autocomplete="off" autocapitalize="characters"
+               spellcheck="false" maxlength="30" aria-label="코드">
+        <button class="btn primary" type="submit">시작</button>
     </form>
-    <div class="quick">
-        <button class="btn" id="today-btn">오늘 문제</button>
-        <button class="btn" id="random-btn">아무 지난 문제</button>
-    </div>
-    <form method="dialog"><button class="btn wide">닫기</button></form>
+    <button class="btn wide" id="today-btn">오늘의 꼬맨틀</button>
+    <form method="dialog"><button class="btn ghost wide">닫기</button></form>
 </dialog>
 
 <dialog id="nearest-dialog" class="sheet tall">

@@ -25,18 +25,43 @@ const store = {
 };
 
 // ---- 워커 호출 ----
-const worker = new Worker('engine.js');
+let worker = null;
 let callId = 0;
 const pending = new Map();
 let onProgress = () => {};
-worker.onmessage = (event) => {
+
+// 안드로이드 앱(WebView)에서는 워커가 APK 안의 파일을 직접 못 읽는 기기가 있어서
+// 화면 쪽에서 파일을 읽어 넘긴다.
+async function startWorker() {
+    if (!IS_APP) {
+        worker = new Worker('engine.js');
+        worker.onmessage = onWorkerMessage;
+        return {cache: true};
+    }
+    const get = async (url) => {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`${url}: ${res.status}`);
+        return res;
+    };
+    const src = await (await get('engine.js')).text();
+    worker = new Worker(URL.createObjectURL(new Blob([src], {type: 'text/javascript'})));
+    worker.onmessage = onWorkerMessage;
+    const [meta, words, vectors] = await Promise.all([
+        get('data/meta.json').then(r => r.json()),
+        get('data/words.txt').then(r => r.arrayBuffer()),
+        get('data/vectors.bin').then(r => r.arrayBuffer()),
+    ]);
+    return {files: {meta, words, vectors}};
+}
+
+function onWorkerMessage(event) {
     const {id, type, result, error} = event.data;
     if (type === 'progress') return onProgress(event.data.loaded, event.data.total);
     const p = pending.get(id);
     if (!p) return;
     pending.delete(id);
     error ? p.reject(new Error(error)) : p.resolve(result);
-};
+}
 function call(type, args) {
     return new Promise((resolve, reject) => {
         const id = ++callId;
@@ -46,9 +71,12 @@ function call(type, args) {
 }
 
 // ---- 상태 ----
+const IS_APP = navigator.userAgent.includes('GgomantleApp');  // 안드로이드 앱(WebView) 안에서 실행 중
+const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';     // 헷갈리는 0/O, 1/I 제외
 let puzzleCount = 4650;
-let today = 0;        // 오늘 문제 번호
-let puzzle = 0;       // 지금 풀고 있는 문제 번호
+let today = 0;        // 오늘의 꼬맨틀 번호
+let current = null;   // {mode: 'code', code} 또는 {mode: 'daily', n}
+let puzzle = 0;       // 지금 문제의 정답 번호 (secrets 인덱스)
 let game = null;      // {guesses: [[sim, word, rank, n]], status, start, end}
 let story = null;
 let latestWord = '';
@@ -59,59 +87,70 @@ function todayPuzzle() {
     return Math.floor((Date.now() - FIRST_DAY) / DAY) % puzzleCount;
 }
 
-function loadGame(n) {
-    return store.get('game:' + n, null) || {guesses: [], status: 'playing', start: null, end: null};
+// 같은 코드면 어느 기기에서든 같은 정답이 나오도록 코드를 해시해서 정답 번호로 바꾼다 (FNV-1a)
+function normalizeCode(code) {
+    return code.normalize('NFC').replace(/\s+/g, '').toUpperCase();
+}
+
+function codeToPuzzle(code) {
+    let h = 0x811c9dc5;
+    for (const b of new TextEncoder().encode(normalizeCode(code))) {
+        h ^= b;
+        h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    return h % puzzleCount;
+}
+
+function randomCode() {
+    const bytes = crypto.getRandomValues(new Uint8Array(5));
+    return Array.from(bytes, b => CODE_CHARS[b % CODE_CHARS.length]).join('');
+}
+
+function gameKey(p) {
+    return p.mode === 'code' ? 'game:c:' + p.code : 'game:d:' + p.n;
+}
+
+function puzzleName(p) {
+    return p.mode === 'code' ? `코드 ${p.code}` : `${p.n}번째 꼬맨틀`;
+}
+
+function loadGame(p) {
+    return store.get(gameKey(p), null) || {guesses: [], status: 'playing', start: null, end: null};
 }
 
 function saveGame() {
-    store.set('game:' + puzzle, game);
+    store.set(gameKey(current), game);
 }
 
 function isOver() {
     return game.status !== 'playing';
 }
 
-// ---- 통계 (오늘 문제만 집계) ----
+// ---- 통계 (모든 게임 집계, 연속 정답은 포기하면 끊김) ----
 function getStats() {
-    return Object.assign({
-        firstPlay: null, lastPlayed: null, played: 0, wins: 0, giveups: 0,
-        totalGuesses: 0, streak: 0, maxStreak: 0, lastWin: null,
-    }, store.get('stats', {}));
+    return Object.assign({played: 0, wins: 0, giveups: 0, totalGuesses: 0, streak: 0, maxStreak: 0},
+        store.get('stats', {}));
 }
 
 function countGuess() {
-    if (puzzle !== today) return;
     const s = getStats();
-    if (s.firstPlay === null) s.firstPlay = today;
-    if (s.lastPlayed !== today) {
-        s.played += 1;
-        s.lastPlayed = today;
-    }
+    if (game.guesses.length === 1) s.played += 1;
     s.totalGuesses += 1;
     store.set('stats', s);
 }
 
 function countEnd(won) {
-    if (puzzle !== today) return;
     const s = getStats();
-    if (s.lastPlayed !== today) {
-        s.played += 1;
-        s.lastPlayed = today;
-    }
+    if (game.guesses.length <= 1) s.played += 1;  // 추측 없이 포기
     if (won) {
         s.wins += 1;
-        s.streak = s.lastWin === today - 1 ? s.streak + 1 : 1;
+        s.streak += 1;
         s.maxStreak = Math.max(s.maxStreak, s.streak);
-        s.lastWin = today;
     } else {
         s.giveups += 1;
         s.streak = 0;
     }
     store.set('stats', s);
-}
-
-function currentStreak(s) {
-    return s.lastWin !== null && s.lastWin >= today - 1 ? s.streak : 0;
 }
 
 // ---- 화면 그리기 ----
@@ -170,7 +209,7 @@ function renderResult() {
     }
     const won = game.status === 'won';
     const count = game.guesses.length - (won ? 0 : 1);
-    const next = puzzle === today
+    const next = current.mode === 'daily' && current.n === today
         ? `<p class="muted small">${today + 1}번째 꼬맨틀은 오늘 밤 자정(한국 시간)에 열립니다.</p>`
         : '';
     box.innerHTML = `
@@ -181,29 +220,34 @@ function renderResult() {
             <button class="btn primary" id="share-btn">기록 공유하기</button>
             <button class="btn" id="top-btn">상위 1,000개 단어</button>
         </div>
-        ${puzzle < today ? '<div class="actions" style="margin-top:8px"><button class="btn" id="next-btn">다음 문제</button></div>' : ''}
+        <div class="actions" style="margin-top:8px"><button class="btn" id="next-btn">새 랜덤 게임</button></div>
         ${next}`;
     box.querySelector('#answer').textContent = `“${game.guesses.find(g => g[0] === 100)?.[1] || ''}”`;
     box.hidden = false;
     $('share-btn').onclick = share;
-    $('top-btn').onclick = () => openNearest(puzzle);
-    if ($('next-btn')) $('next-btn').onclick = () => goTo(puzzle + 1);
+    $('top-btn').onclick = () => openNearest(current);
+    $('next-btn').onclick = newRandomGame;
 }
 
 function renderStory() {
-    $('story').innerHTML = story
-        ? `<b>${puzzle}번째</b> 꼬맨틀의 정답 단어를 맞혀 보세요.<br>
+    const name = `<b class="pname"></b>`;
+    $('story').innerHTML = (story
+        ? `${name}의 정답 단어를 맞혀 보세요.<br>
            정답과 가장 유사한 단어의 유사도는 <b>${fmtSim(story.top * 100)}</b>,
            10번째는 ${fmtSim(story.top10 * 100)}, 1,000번째는 ${fmtSim(story.rest * 100)}입니다.`
-        : `<b>${puzzle}번째</b> 꼬맨틀의 정답 단어를 맞혀 보세요.`;
-    const chip = $('puzzle-chip');
-    chip.textContent = puzzle === today ? `#${puzzle} 오늘` : `#${puzzle} 지난 문제`;
-    chip.classList.toggle('past', puzzle !== today);
+        : `${name}의 정답 단어를 맞혀 보세요.`)
+        + (current.mode === 'code' ? ' <a href="#" id="share-code">친구와 같이 풀기</a>' : '');
+    $('story').querySelector('.pname').textContent = puzzleName(current);
+    if ($('share-code')) $('share-code').onclick = (e) => {
+        e.preventDefault();
+        shareCode();
+    };
+    $('puzzle-chip').textContent = current.mode === 'code' ? current.code : `#${current.n} 오늘`;
 }
 
 async function renderYesterday() {
     const el = $('yesterday');
-    if (puzzle !== today || today === 0) {
+    if (current.mode !== 'daily' || current.n !== today || today === 0) {
         el.textContent = '';
         return;
     }
@@ -212,7 +256,7 @@ async function renderYesterday() {
     el.querySelector('b').textContent = `“${word}”`;
     $('yesterday-top').onclick = (e) => {
         e.preventDefault();
-        openNearest(today - 1);
+        openNearest({mode: 'daily', n: today - 1});
     };
 }
 
@@ -277,14 +321,20 @@ async function giveUp() {
     showResult();
 }
 
+function puzzleLink(p) {
+    if (IS_APP) return '';
+    return '\n' + location.origin + location.pathname + (p.mode === 'code' ? `#c=${encodeURIComponent(p.code)}` : '');
+}
+
 function shareText() {
-    const url = location.origin + location.pathname;
+    const name = current.mode === 'code' ? `꼬맨틀(코드 ${current.code})` : `${current.n}번째 꼬맨틀`;
+    const tail = puzzleLink(current).trim();
     const won = game.status === 'won';
     const count = game.guesses.length - (won ? 0 : 1);
-    if (won && count === 1) return `이럴 수가! 첫 번째 추측에서 ${puzzle}번째 꼬맨틀 정답 단어를 맞혔습니다!\n${url}`;
-    if (count === 0) return `${puzzle}번째 꼬맨틀을 시도하지 않고 바로 포기했어요.\n${url}`;
+    if (won && count === 1) return `이럴 수가! 첫 번째 추측에서 ${name} 정답 단어를 맞혔습니다!\n${tail}`.trim();
+    if (count === 0) return `${name}을 시도하지 않고 바로 포기했어요.\n${tail}`.trim();
 
-    let text = won ? `${puzzle}번째 꼬맨틀을 풀었습니다!\n` : `저런… ${puzzle}번째 꼬맨틀을 포기했어요..ㅠ\n`;
+    let text = won ? `${name}을 풀었습니다!\n` : `저런… ${name}을 포기했어요..ㅠ\n`;
     if (settings.shareGuesses) text += `추측 횟수: ${count}\n`;
     if (settings.shareTime && game.start && game.end) {
         const sec = Math.round((game.end - game.start) / 1000);
@@ -296,11 +346,22 @@ function shareText() {
         const best = game.guesses.filter(g => g[0] < 100).sort((a, b) => b[0] - a[0])[0];
         if (best) text += `최대 유사도: ${fmtSim(best[0])}${typeof best[2] === 'number' ? ` (순위 ${best[2]})` : ''}\n`;
     }
-    return text + url;
+    return (text + tail).trim();
 }
 
-async function share() {
-    const text = shareText();
+function share() {
+    shareRaw(shareText());
+}
+
+function shareCode() {
+    shareRaw(`꼬맨틀 같이 풀자! 코드: ${current.code}\n(꼬맨틀 → 상단 코드 버튼 → 코드 입력)${puzzleLink(current)}`);
+}
+
+async function shareRaw(text) {
+    if (window.GgoApp && window.GgoApp.share) {  // 안드로이드 앱: 기본 공유 창
+        window.GgoApp.share(text);
+        return;
+    }
     if (navigator.share) {
         try {
             await navigator.share({text});
@@ -317,24 +378,35 @@ async function share() {
     }
 }
 
-async function openNearest(n) {
+async function openNearest(p) {
     const dialog = $('nearest-dialog');
     $('nearest-list').innerHTML = '<p class="muted center">계산 중…</p>';
     dialog.showModal();
-    const {secret, list} = await call('nearest', {puzzle: n});
-    const mine = new Set(loadGame(n).guesses.map(g => g[1]));
+    const {secret, list} = await call('nearest', {puzzle: puzzleIndex(p)});
+    const mine = new Set(loadGame(p).guesses.map(g => g[1]));
     $('nearest-title').textContent = `“${secret}”와 가장 비슷한 1,000개`;
     const rows = list.map(({word, rank, sim}) =>
         `<tr${mine.has(word) ? ' class="mine"' : ''}><td>${rank}</td><td>${word}</td><td>${fmtSim(sim * 100)}</td></tr>`);
     $('nearest-list').innerHTML = `<table><thead><tr><th>순위</th><th>단어</th><th>유사도</th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
 }
 
-async function goTo(n) {
-    n = Math.max(0, Math.min(today, Math.floor(n)));
-    if (Number.isNaN(n)) return;
-    puzzle = n;
-    history.replaceState(null, '', n === today ? location.pathname : `#${n}`);
-    game = loadGame(puzzle);
+function puzzleIndex(p) {
+    return p.mode === 'code' ? codeToPuzzle(p.code) : p.n;
+}
+
+function newRandomGame() {
+    return goTo({mode: 'code', code: randomCode()});
+}
+
+async function goTo(p) {
+    current = p;
+    puzzle = puzzleIndex(p);
+    store.set('current', p);
+    if (!IS_APP) {
+        history.replaceState(null, '', location.pathname +
+            (p.mode === 'code' ? `#c=${encodeURIComponent(p.code)}` : `#d=${p.n}`));
+    }
+    game = loadGame(p);
     latestWord = '';
     $('error').textContent = '';
     story = null;
@@ -368,23 +440,24 @@ function setupUi() {
     $('help-btn').addEventListener('click', () => $('help-dialog').showModal());
     $('menu-btn').addEventListener('click', openMenu);
     $('puzzle-chip').addEventListener('click', () => {
-        const input = $('puzzle-input');
-        input.max = today;
-        input.value = puzzle;
+        $('puzzle-input').value = '';
+        $('today-btn').textContent = `오늘의 꼬맨틀 (#${today})`;
         $('puzzle-dialog').showModal();
     });
     $('puzzle-form').addEventListener('submit', (e) => {
         e.preventDefault();
+        const code = normalizeCode($('puzzle-input').value);
+        if (!code) return;
         $('puzzle-dialog').close();
-        goTo(Number($('puzzle-input').value));
+        goTo({mode: 'code', code});
     });
     $('today-btn').addEventListener('click', () => {
         $('puzzle-dialog').close();
-        goTo(today);
+        goTo({mode: 'daily', n: today});
     });
     $('random-btn').addEventListener('click', () => {
         $('puzzle-dialog').close();
-        goTo(Math.floor(Math.random() * today));
+        newRandomGame();
     });
     document.querySelectorAll('.sort button').forEach(b => b.addEventListener('click', () => {
         sortMode = b.dataset.sort;
@@ -410,18 +483,26 @@ function setupUi() {
         });
     }
 
-    // 자정이 지나 앱으로 돌아오면 새 문제로
+    // 자정이 지나면 '오늘의 꼬맨틀' 번호 갱신
     document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible' && todayPuzzle() !== today) {
-            const wasToday = puzzle === today;
-            today = todayPuzzle();
-            if (wasToday) goTo(today);
-        }
+        if (document.visibilityState === 'visible') today = todayPuzzle();
     });
     window.addEventListener('hashchange', () => {
-        const n = parseInt(location.hash.slice(1), 10);
-        goTo(Number.isNaN(n) ? today : n);
+        const p = puzzleFromHash();
+        if (p) goTo(p);
     });
+}
+
+// #c=코드 또는 #d=번호
+function puzzleFromHash() {
+    const m = location.hash.match(/^#([cd])=(.+)$/);
+    if (!m) return null;
+    if (m[1] === 'c') {
+        const code = normalizeCode(decodeURIComponent(m[2]));
+        return code ? {mode: 'code', code} : null;
+    }
+    const n = parseInt(m[2], 10);
+    return n >= 0 && n <= today ? {mode: 'daily', n} : null;
 }
 
 async function start() {
@@ -439,7 +520,7 @@ async function start() {
 
     let info;
     try {
-        info = await call('init');
+        info = await call('init', await startWorker());
     } catch (e) {
         $('loading-text').textContent = e.message === 'offline-first-run'
             ? '처음 한 번은 인터넷 연결이 필요해요. 연결한 뒤 다시 시도해 주세요.'
@@ -455,14 +536,17 @@ async function start() {
     $('game').hidden = false;
 
     let persisted = false;
-    try { persisted = navigator.storage && await navigator.storage.persist(); } catch (e) {}
+    if (!IS_APP) {
+        try { persisted = navigator.storage && await navigator.storage.persist(); } catch (e) {}
+    }
     $('storage-info').textContent = `오프라인 준비 완료 · 데이터 ${info.version}${persisted ? ' · 저장공간 보호됨' : ''}`;
 
-    const fromHash = parseInt(location.hash.slice(1), 10);
-    await goTo(Number.isNaN(fromHash) ? today : fromHash);
+    // 링크로 받은 문제 → 하던 게임 → 새 랜덤 게임
+    const saved = store.get('current', null);
+    await goTo(puzzleFromHash() || (saved && saved.mode ? saved : null) || {mode: 'code', code: randomCode()});
 }
 
-if ('serviceWorker' in navigator) {
+if ('serviceWorker' in navigator && !IS_APP) {
     window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
 }
 

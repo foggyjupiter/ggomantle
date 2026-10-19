@@ -5,7 +5,7 @@
 */
 'use strict';
 
-const SHELL_CACHE = 'ggo-shell-v1';
+const SHELL_CACHE = 'ggo-shell-v2';
 const DATA_CACHE = 'ggo-data';
 const SHELL = [
     './',

@@ -82,8 +82,10 @@ async function removeOldData(cache, keepUrls) {
     }
 }
 
-async function init() {
-    const cache = await openCache();
+// opts.cache: false면 저장하지 않는다 (안드로이드 앱은 데이터가 APK 안에 있음)
+async function init(opts) {
+    if (opts.files) return setup(opts.files.meta, opts.files.words, opts.files.vectors);
+    const cache = opts.cache === false ? null : await openCache();
     meta = await loadMeta(cache);
     const wordsUrl = `data/words.txt?v=${meta.version}`;
     const vecUrl = `data/vectors.bin?v=${meta.version}`;
@@ -100,16 +102,23 @@ async function init() {
         loadFile(cache, vecUrl, (l, t) => { progress.vectors = [l, t || expected]; report(); }),
     ]);
     await removeOldData(cache, [wordsUrl, vecUrl]);
-
-    words = new TextDecoder().decode(wordsBuf).split('\n');
-    vectors = new Int8Array(vecBuf);
-    if (words.length !== meta.count || vectors.length !== expected) {
+    try {
+        return setup(meta, wordsBuf, vecBuf);
+    } catch (e) {
         if (cache) {
             await cache.delete(vecUrl);
             await cache.delete(wordsUrl);
         }
-        throw new Error('corrupt-data');
+        throw e;
     }
+}
+
+// 안드로이드 앱에서는 화면 쪽이 파일을 읽어 넘겨준다 (WebView가 워커의 요청을 못 가로채는 기기가 있음)
+function setup(metaData, wordsBuf, vecBuf) {
+    meta = metaData;
+    words = new TextDecoder().decode(wordsBuf).split('\n');
+    vectors = new Int8Array(vecBuf);
+    if (words.length !== meta.count || vectors.length !== meta.count * meta.dim) throw new Error('corrupt-data');
     index = new Map();
     for (let i = 0; i < words.length; i++) index.set(words[i], i);
 
@@ -188,7 +197,7 @@ self.onmessage = async (event) => {
     const {id, type, args} = event.data;
     try {
         if (type === 'init') {
-            ready = ready || init();
+            ready = ready || init(args || {});
             postMessage({id, result: await ready});
             return;
         }

@@ -104,7 +104,7 @@ button, input, select { font: inherit; color: inherit; }
     color: var(--muted);
     cursor: pointer;
 }
-.puzzle-chip.past { color: var(--accent); border-color: var(--accent); }
+.puzzle-chip { color: var(--accent); border-color: var(--accent); font-weight: 600; letter-spacing: .04em; }
 
 main {
     max-width: 560px;
@@ -245,8 +245,9 @@ dialog p { font-size: 15px; }
 .stats b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
 .stats span { font-size: 12px; color: var(--muted); }
 
-.quick { display: flex; gap: 8px; margin-top: 8px; }
-.quick .btn { flex: 1; }
+dialog h2.gap { margin-top: 22px; }
+#puzzle-form { margin-bottom: 8px; }
+#puzzle-input { text-transform: uppercase; }
 
 .nearest-list { flex: 1; overflow: auto; margin: 0 -4px; }
 .nearest-list table { width: 100%; border-collapse: collapse; font-size: 15px; }

@@ -1,0 +1,55 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'io.github.foggyjupiter.ggomantle'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'io.github.foggyjupiter.ggomantle'
+        minSdk 24
+        // 35부터는 화면이 상태 표시줄 아래까지 강제로 늘어나서 34로 둔다
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+    }
+
+    sourceSets {
+        // 웹 버전(web/)을 그대로 앱 안에 넣는다
+        main.assets.srcDirs = ['../../web']
+    }
+
+    androidResources {
+        noCompress 'bin'
+    }
+
+    signingConfigs {
+        release {
+            // 서명 키는 저장소에 두지 않는다. 환경 변수가 없으면 debug 키로 서명.
+            def ks = System.getenv('GGO_KEYSTORE')
+            if (ks) {
+                storeFile file(ks)
+                storePassword System.getenv('GGO_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('GGO_KEY_ALIAS')
+                keyPassword System.getenv('GGO_KEY_PASSWORD')
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig System.getenv('GGO_KEYSTORE') ? signingConfigs.release : signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'androidx.webkit:webkit:1.12.1'
+}
